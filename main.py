@@ -10,6 +10,7 @@ OUTPUT_FILEPATH = "output.jpg"
 
 NUM_PINS = 100
 NUM_LINES = 2000 
+MAX_RESOLUTION = 700
 
 INVERT_IMAGE = False
 PREVIEW_IMAGE = False
@@ -27,11 +28,15 @@ img = cv.imread(IMPORT_FILEPATH, cv.IMREAD_GRAYSCALE)
 if INVERT_IMAGE:
     img = ~img
 
-# the smaller side of the image fed to the program will be the radius of the circle
-radius = min(img.shape)
+# the smaller side of the image fed to the program will be the size of the cropped image
+crop_size = min(img.shape)
 
-# crop the image to a square with side length equal to the radius.
-cropped_img = img[(int)(img.shape[0]/2 - radius/2):(int)(img.shape[0]/2 + radius/2), (int)(img.shape[1]/2 - radius/2):(int)(img.shape[1]/2 + radius/2)]
+# crop the image to a square aspect ratio
+cropped_img = img[(int)(img.shape[0]/2 - crop_size/2):(int)(img.shape[0]/2 + crop_size/2), (int)(img.shape[1]/2 - crop_size/2):(int)(img.shape[1]/2 + crop_size/2)]
+
+# Lower the resolution
+radius = min(crop_size, MAX_RESOLUTION)
+cropped_img = cv.resize(cropped_img, dsize=(radius, radius), interpolation=cv.INTER_CUBIC)
 
 # the amount of 'nails' to be used in the image
 pins = []
