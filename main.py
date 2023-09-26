@@ -4,9 +4,10 @@ import cv2 as cv
 import numpy as np
 
 # CONSTANTS/CONFIG
-IMPORT_FILEPATH = "radiation.webp"
-PINNED_FILEPATH = "pinned.jpg"
-OUTPUT_FILEPATH = "output.jpg"
+IMPORT_FILEPATH = "res/mona_lisa.jpg"
+PINNED_FILEPATH = "output/pinned.jpg"
+OUTPUT_FILEPATH = "output/output.jpg"
+PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 
 NUM_PINS = 100
 NUM_LINES = 2000 
@@ -93,6 +94,7 @@ start_index = 0
 for p in pins:
     pinned_image = cv.circle(cropped_img, (p[0]-1,p[1]-1), 3, 255, -1)
 
+pin_history = []
 for i in range(NUM_LINES):
     this_pq = priority_queues[start_index]
 
@@ -111,12 +113,18 @@ for i in range(NUM_LINES):
     # draw final line on image
     final_image = cv.line(final_image, pins[start_index], pins[dest_index], 0, 1)
 
+    # Add 
+    pin_history.append(start_index)
+
     # set starting index to destination for next loop
     start_index = dest_index
 
     sys.stdout.write('\r')
     sys.stdout.write(f'Printing image... {(int)(i/NUM_LINES*100)}%')
     sys.stdout.flush()
+
+# Add last pin
+pin_history.append(start_index)
 
 print("\nFinished!")
 
@@ -125,8 +133,13 @@ if PREVIEW_IMAGE:
     cv.imshow("final image", final_image)
 
 # Write image to output files
-cv.imwrite(PINNED_FILEPATH, pinned_image)
-cv.imwrite(OUTPUT_FILEPATH, final_image)
+if PINNED_FILEPATH != "": cv.imwrite(PINNED_FILEPATH, pinned_image)
+if OUTPUT_FILEPATH != "": cv.imwrite(OUTPUT_FILEPATH, final_image)
+
+if PINS_OUTPUT_FILEPATH != "":
+    f = open(PINS_OUTPUT_FILEPATH, "w")
+    f.write("\n".join([str(p) for p in pin_history]))
+    f.close()
 
 # wait until window is closed to stop GUI
 cv.waitKey(0)
