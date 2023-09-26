@@ -4,12 +4,12 @@ import cv2 as cv
 import numpy as np
 
 # CONSTANTS/CONFIG
-IMPORT_FILEPATH = "mona_lisa.jpg"
+IMPORT_FILEPATH = "radiation.webp"
 PINNED_FILEPATH = "pinned.jpg"
 OUTPUT_FILEPATH = "output.jpg"
 
 NUM_PINS = 100
-NUM_LINES = 2000 
+NUM_LINES = 1000 
 
 INVERT_IMAGE = False
 PREVIEW_IMAGE = False
@@ -65,12 +65,10 @@ for f, pin_from in enumerate(pins):
         line_length = np.linalg.norm(np.array(pin_from) - np.array(pin_to))
 
         # Cost is the difference between the images averaged with line length
-        cost = np.sum(cv.absdiff(line_image, cropped_img)) /line_length
+        cost = np.sum(cv.absdiff(line_image, cropped_img))/line_length
 
         # Push cost and destination pin index
         heapq.heappush(priority_queue, (cost, t)) 
-
-        del line_image
 
     priority_queues.append(priority_queue)
     del priority_queue
