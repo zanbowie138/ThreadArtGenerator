@@ -4,9 +4,9 @@ import cv2 as cv
 import numpy as np
 
 # CONSTANTS/CONFIG
-IMPORT_FILEPATH = "radiation.webp"
-PINNED_FILEPATH = "pinned.jpg"
-OUTPUT_FILEPATH = "output.jpg"
+IMPORT_FILEPATH = "res/radiation.webp"
+PINNED_FILEPATH = "output/pinned.jpg"
+OUTPUT_FILEPATH = "output/output.jpg"
 
 NUM_PINS = 100
 NUM_LINES = 2000 
