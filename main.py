@@ -4,12 +4,12 @@ import cv2 as cv
 import numpy as np
 
 # CONSTANTS/CONFIG
-IMPORT_FILEPATH = "res/radiation.webp"
+IMPORT_FILEPATH = "res/mona_lisa.jpg"
 PINNED_FILEPATH = "output/pinned.jpg"
 OUTPUT_FILEPATH = "output/output.jpg"
 
-NUM_PINS = 100
-NUM_LINES = 2000 
+NUM_PINS = 20
+NUM_LINES = 100 
 MAX_RESOLUTION = 700
 
 INVERT_IMAGE = False
@@ -56,67 +56,60 @@ for i in range(NUM_PINS):
 # TODO: Actually prevent duplicate lines
 
 # calculate priority queues for each pin
-priority_queues = []
-for f, pin_from in enumerate(pins):
+start_index = 0
+line_image = np.full(cropped_img.shape,255, dtype=np.uint8)
+final_image = np.full((radius, radius), 255, dtype=np.uint8)
+pin_history = [[] for x in range(NUM_PINS)]
+
+for line_idx in range(NUM_LINES):
     priority_queue = []
+    pin_from = pins[start_index]
+
     for t, pin_to in enumerate(pins):
         # If calculating a line with itself, continue
-        if f == t: continue
+        if start_index == t: continue
 
-        # Create image with line
-        line_image = cv.line(np.copy(cropped_img), pin_from, pin_to, 0, 1)
+        # Add line to proposed image
+        proposed_line_img = cv.line(np.copy(line_image), pin_from, pin_to, 0, 1)
+
+        # Actual line change
+        line_effectiveness = np.sum(cv.absdiff(proposed_line_img, line_image))
 
         # Line length
         line_length = np.linalg.norm(np.array(pin_from) - np.array(pin_to))
 
         # Cost is the difference between the images averaged with line length
-        cost = np.sum(cv.absdiff(line_image, cropped_img))/line_length
+        benefit = (np.sum(cv.absdiff(line_image, cropped_img))) / (line_length)
 
-        # Push cost and destination pin index
-        heapq.heappush(priority_queue, (cost, t)) 
+        # Push benefit and destination pin index
+        heapq.heappush(priority_queue, (benefit, t)) 
 
-    priority_queues.append(priority_queue)
-    del priority_queue
-
-    # Fancy status printing
-    sys.stdout.write('\r')
-    sys.stdout.write(f'Calculating priority queues... {(int)(f/NUM_PINS*100)}%')
-    sys.stdout.flush()
-
-# New line out of status
-sys.stdout.write("\n")
-
-final_image = np.full((radius, radius), 255, dtype=np.uint8)
-start_index = 0
-
-# Draw pins
-for p in pins:
-    pinned_image = cv.circle(cropped_img, (p[0]-1,p[1]-1), 3, 255, -1)
-
-for i in range(NUM_LINES):
-    this_pq = priority_queues[start_index]
-
-    dest_index = heapq.heappop(this_pq)[1]
-
-    # If destination has their smallest cost line as a duplicate, remove it
-    dest_pq = priority_queues[dest_index]
-    if (dest_pq[0][1] == start_index and len(dest_pq) > 0):
-        heapq.heappop(dest_pq)
-    
-
-    # uniqueness = np.sum(cv.absdiff(final_image, cv.line(np.copy(final_image), pins[start_index], pins[dest_index], 255, 1)))
-    # if uniqueness < 1000 and len(this_pins_pq) > 0:
-    #     continue
+    dest_index = heapq.heappop(priority_queue)[1]
+    while (dest_index in pin_history[start_index]):
+        dest_index = heapq.heappop(priority_queue)[1]
 
     # draw final line on image
     final_image = cv.line(final_image, pins[start_index], pins[dest_index], 0, 1)
 
+    # draw line on line image
+    line_image = cv.line(line_image, pins[start_index], pins[dest_index], 0, 1)
+
+    # add destination index to history
+    pin_history[start_index].append(dest_index)
+    pin_history[dest_index].append(start_index)
+
     # set starting index to destination for next loop
     start_index = dest_index
 
+    # Fancy status printing
     sys.stdout.write('\r')
-    sys.stdout.write(f'Printing image... {(int)(i/NUM_LINES*100)}%')
+    sys.stdout.write(f'Printing lines... {(int)(line_idx/NUM_LINES*100)}%')
     sys.stdout.flush()
+
+
+# Draw pins
+for p in pins:
+    pinned_image = cv.circle(cropped_img, (p[0]-1,p[1]-1), 3, 255, -1)
 
 print("\nFinished!")
 
