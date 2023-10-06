@@ -11,7 +11,7 @@ OUTPUT_FILEPATH = "output/output.jpg"
 PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 
 NUM_PINS = 100
-NUM_LINES = 2000
+NUM_LINES = 1000
 
 MAX_RESOLUTION = 700
 
@@ -25,150 +25,174 @@ USE_LINE_LENGTH = False
 # apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 # CTRL-SHIFT-P -> Python: Disable Linting (if not already disabled)
 
-# Start time
-start_time = time.perf_counter()
+def calculate_pins(radius: int, num_pins: int):
+    # Create empty array of 2d points
+    pins = np.empty((num_pins,2), dtype=object)
 
-# Import image
-img = cv.imread(IMPORT_FILEPATH, cv.IMREAD_GRAYSCALE)
+    # Fill array with pins
+    for i in range(num_pins):
+        angle = (2*np.pi/num_pins)*i
+        x = (int)((radius-3)/2 * np.cos(angle) + radius/2)
+        y = (int)((radius-3)/2 * np.sin(angle) + radius/2)
+        pins[i] = np.array((x,y))
 
-# Invert all bits (if background is black)
-if INVERT_IMAGE: img = ~img
+    return pins
 
-# the smaller side of the image fed to the program will be the size of the cropped image
-crop_size = min(img.shape)
+def prepare_image(import_filepath: str, max_resolution: tuple, invert_image: bool = False):
+    # Import image
+    img = cv.imread(import_filepath, cv.IMREAD_GRAYSCALE)
 
-# crop the image to a square aspect ratio
-cropped_img = img[(int)(img.shape[0]/2 - crop_size/2):(int)(img.shape[0]/2 + crop_size/2), (int)(img.shape[1]/2 - crop_size/2):(int)(img.shape[1]/2 + crop_size/2)]
+    # Invert all bits (if background is black)
+    if invert_image: img = ~img
 
-# Lower the resolution
-radius = min(crop_size, MAX_RESOLUTION)
-cropped_img = cv.resize(cropped_img, dsize=(radius, radius), interpolation=cv.INTER_CUBIC)
+    # the smaller side of the image fed to the program will be the size of the cropped image
+    crop_size = min(img.shape)
 
-# create a circle of pins around the image
-pins = []
-for i in range(NUM_PINS):
-    angle = (2*np.pi/NUM_PINS)*i
-    x = (int)((radius-3)/2 * np.cos(angle) + radius/2)
-    y = (int)((radius-3)/2 * np.sin(angle) + radius/2)
-    pins.append((x,y))
+    # crop the image to a square aspect ratio
+    cropped_img = img[(int)(img.shape[0]/2 - crop_size/2):(int)(img.shape[0]/2 + crop_size/2), (int)(img.shape[1]/2 - crop_size/2):(int)(img.shape[1]/2 + crop_size/2)]
 
-# TODO: add convolutional edge detection
-
-# Initialize 2d array of line costs
-ground_truth_costs = np.empty((NUM_PINS, NUM_PINS))
-
-# Calculate lines' cost based on image
-for f_idx, pos_f in enumerate(pins):
-    for t_idx, pos_t in enumerate(pins):
-        # If calculating a line with itself, continue
-        if f_idx == t_idx: continue
-
-        # Create proposed new image with line
-        proposed_img = cv.line(np.copy(cropped_img), pos_f, pos_t, 0, 1)
-
-        # Cost is the difference between the images
-        cost = np.sum(cv.absdiff(proposed_img, cropped_img)).item()
-
-        # Add cost to array
-        ground_truth_costs[f_idx, t_idx] = cost
+    # Lower the resolution
+    radius = min(crop_size, max_resolution)
+    cropped_img = cv.resize(cropped_img, dsize=(radius, radius), interpolation=cv.INTER_CUBIC)
     
-    # Fancy status printing
-    sys.stdout.write('\r')
-    sys.stdout.write(f'Calculating ground truth costs... {(int)(f_idx/NUM_PINS*100)}%')
-    sys.stdout.flush()
+    return cropped_img, radius
 
-# Move to next line
-sys.stdout.write("\n")
+def main():
+    # Start time
+    start_time = time.perf_counter()
 
-# Create blank final image
-final_image = np.full((radius, radius), 255, dtype=np.uint8)
+    # Get initial image
+    base_img, radius = prepare_image(IMPORT_FILEPATH, MAX_RESOLUTION, INVERT_IMAGE)
 
-from_idx = 0
-pin_history = [set() for x in range(NUM_PINS)]
+    # Calculate positions of pins around the image
+    pins = calculate_pins(radius, NUM_PINS)
 
-# Calculate final lines
-for line_idx in range(NUM_LINES):
-    from_pos = pins[from_idx]
+    # TODO: add convolutional edge detection
 
-    # Rank each possible line by cost
-    priority_queue = []
-    for dest_idx, dest_pos in enumerate(pins):
-        # If calculating a line with itself, continue
-        if from_idx == dest_idx: continue
+    # Initialize 2d array of line costs
+    ground_truth_costs = np.empty((NUM_PINS, NUM_PINS))
 
-        # Add line to proposed image
-        proposed_line_img = cv.line(np.copy(final_image), from_pos, dest_pos, 0, 1)
+    # Calculate lines' cost based on image
+    for f_idx, pos_f in enumerate(pins):
+        for t_idx, pos_t in enumerate(pins):
+            # If calculating a line with itself, continue
+            if f_idx == t_idx: continue
 
-        # See how much line actually changes the picture
-        line_effectiveness = np.sum(cv.absdiff(proposed_line_img, final_image)) 
+            # Create proposed new image with line
+            proposed_img = cv.line(np.copy(base_img), pos_f, pos_t, 0, 1)
 
-        # Line length
-        line_length = np.linalg.norm(np.array(from_pos) - np.array(dest_pos))
+            # Cost is the difference between the images
+            cost = np.sum(cv.absdiff(proposed_img, base_img)).item()
 
-        # Calculate actual cost
-        scaled_cost = (ground_truth_costs[from_idx, dest_idx] - line_effectiveness.item())
-
-        # If true, higher length lines will be more prevalent at the cost of a possibly worse image
-        if USE_LINE_LENGTH: scaled_cost /= line_length.item()
-
-        # Push cost and destination pin index
-        heapq.heappush(priority_queue, (scaled_cost, dest_idx))
-
-
-    # Only create new lines
-    heap_idx = 1
-    dest_index = priority_queue[0][1]
-    while (True):
-        # If there are no new lines, raise exception
-        if heap_idx == len(priority_queue) - 1:
-            raise Exception("Pin duplicate!")
+            # Add cost to array
+            ground_truth_costs[f_idx, t_idx] = cost
         
-        # If the line has already been drawn, try next best
-        elif dest_index in pin_history[from_idx]:
-            dest_index = priority_queue[heap_idx][1]
-            heap_idx+=1
+        # Fancy status printing
+        sys.stdout.write('\r')
+        sys.stdout.write(f'Calculating ground truth costs... {(int)(f_idx/NUM_PINS*100)}%')
+        sys.stdout.flush()
 
-        # Otherwise, the line is new 
-        else:
-            break
+    # Move to next line
+    sys.stdout.write("\n")
 
-    # draw final line on image
-    final_image = cv.line(final_image, pins[from_idx], pins[dest_index], 0, 1)
+    # Create blank final image
+    final_image = np.full((radius, radius), 255, dtype=np.uint8)
 
-    # add destination index to history
-    pin_history[from_idx].add(dest_index)
-    pin_history[dest_index].add(from_idx)
+    # Pin history of every pin (to prevent duplicate lines)
+    per_pin_history = [set() for x in range(NUM_PINS)]
 
-    # set starting index to destination for next loop
-    from_idx = dest_index
+    # Overall pin history (for output)
+    pin_history = np.empty(NUM_LINES+1)
 
-    # Fancy status printing
-    sys.stdout.write('\r')
-    sys.stdout.write(f'Printing lines... {(int)(line_idx/NUM_LINES*100)}%')
-    sys.stdout.flush()
+    # Calculate final lines
+    from_idx = 0
+    pin_history[0] = from_idx
+    for line_idx in range(NUM_LINES):
+        from_pos = pins[from_idx]
+
+        # Rank each possible line by cost
+        priority_queue = []
+        for dest_idx, dest_pos in enumerate(pins):
+            # If calculating a line with itself, continue
+            if from_idx == dest_idx: continue
+
+            # Add line to proposed image
+            proposed_line_img = cv.line(np.copy(final_image), from_pos, dest_pos, 0, 1)
+
+            # See how much line actually changes the picture
+            line_effectiveness = np.sum(cv.absdiff(proposed_line_img, final_image)) 
+
+            # Calculate line length
+            line_length = np.linalg.norm(np.array(from_pos) - np.array(dest_pos))
+
+            # Calculate actual cost
+            scaled_cost = (ground_truth_costs[from_idx, dest_idx] - line_effectiveness.item())
+
+            # If true, higher length lines will be more prevalent at the cost of a possibly worse image
+            if USE_LINE_LENGTH: scaled_cost /= line_length.item()
+
+            # Push cost and destination pin index
+            heapq.heappush(priority_queue, (scaled_cost, dest_idx))
 
 
-# Draw pins
-for p in pins:
-    pinned_image = cv.circle(cropped_img, (p[0]-1,p[1]-1), 3, 255, -1)
+        # Only create new lines
+        heap_idx = 1
+        dest_index = priority_queue[0][1]
+        while heap_idx < len(priority_queue) - 1:
+            # If the line has already been drawn, try next best
+            if dest_index in per_pin_history[from_idx]:
+                dest_index = priority_queue[heap_idx][1]
+                heap_idx+=1
 
-print(f'\nFinished! \nProgram time: {time.perf_counter() - start_time:0.4f} seconds')
+            # Otherwise, the line is new 
+            else:
+                break
 
-if PREVIEW_IMAGE:
-    cv.imshow("pinned image", pinned_image)
-    cv.imshow("final image", final_image)
+        # draw final line on image
+        final_image = cv.line(final_image, pins[from_idx], pins[dest_index], 0, 1)
 
-# Write image to output files
-if PINNED_FILEPATH != "": cv.imwrite(PINNED_FILEPATH, pinned_image)
-if OUTPUT_FILEPATH != "": cv.imwrite(OUTPUT_FILEPATH, final_image)
+        # add destination index to history
+        per_pin_history[from_idx].add(dest_index)
+        per_pin_history[dest_index].add(from_idx)
 
-if PINS_OUTPUT_FILEPATH != "":
-    f = open(PINS_OUTPUT_FILEPATH, "w")
-    f.write("\n".join([str(p) for p in pin_history]))
-    f.close()
+        # Add to overall pin history
+        pin_history[line_idx + 1] = dest_index
 
-# wait until window is closed to stop GUI
-cv.waitKey(0)
+        # set starting index to destination for next loop iteration
+        from_idx = dest_index
 
-# clear memory and destroy GUI
-cv.destroyAllWindows()
+        # Fancy status printing
+        sys.stdout.write('\r')
+        sys.stdout.write(f'Printing lines... {(int)(line_idx/NUM_LINES*100)}%')
+        sys.stdout.flush()
+
+
+    # Draw pins
+    for p in pins:
+        pinned_image = cv.circle(base_img, (p[0]-1,p[1]-1), 3, 255, -1)
+
+    print(f'\nFinished! \nProgram time: {time.perf_counter() - start_time:0.4f} seconds')
+
+    # Preview image
+    if PREVIEW_IMAGE:
+        cv.imshow("pinned image", pinned_image)
+        cv.imshow("final image", final_image)
+
+    # Write image to output files
+    if PINNED_FILEPATH != "": cv.imwrite(PINNED_FILEPATH, pinned_image)
+    if OUTPUT_FILEPATH != "": cv.imwrite(OUTPUT_FILEPATH, final_image)
+
+    # Write pin history to txt file
+    if PINS_OUTPUT_FILEPATH != "":
+        f = open(PINS_OUTPUT_FILEPATH, "w")
+        f.write(",".join([str(int(p)) for p in pin_history]))
+        f.close()
+
+    # wait until window is closed to stop GUI
+    cv.waitKey(0)
+
+    # clear memory and destroy GUI
+    cv.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
