@@ -8,6 +8,7 @@ import time
 IMPORT_FILEPATH = "res/mona_lisa.jpg"
 PINNED_FILEPATH = "output/pinned.jpg"
 OUTPUT_FILEPATH = "output/output.jpg"
+PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 
 NUM_PINS = 100
 NUM_LINES = 2000
@@ -158,8 +159,13 @@ if PREVIEW_IMAGE:
     cv.imshow("final image", final_image)
 
 # Write image to output files
-cv.imwrite(PINNED_FILEPATH, pinned_image)
-cv.imwrite(OUTPUT_FILEPATH, final_image)
+if PINNED_FILEPATH != "": cv.imwrite(PINNED_FILEPATH, pinned_image)
+if OUTPUT_FILEPATH != "": cv.imwrite(OUTPUT_FILEPATH, final_image)
+
+if PINS_OUTPUT_FILEPATH != "":
+    f = open(PINS_OUTPUT_FILEPATH, "w")
+    f.write("\n".join([str(p) for p in pin_history]))
+    f.close()
 
 # wait until window is closed to stop GUI
 cv.waitKey(0)
