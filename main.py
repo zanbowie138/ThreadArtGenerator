@@ -14,8 +14,12 @@ OUTPUT_FILEPATH = "output/output.jpg"
 PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 EDGE_OUTPUT_FILEPATH = "debug/edges.jpg"
 
-NUM_PINS = 100
-NUM_LINES = 2000
+NUM_PINS = 50
+NUM_LINES = 200
+
+MIN_PIN_DISTANCE = 5
+
+LINE_THICKNESS = 1
 
 MIN_PIN_DISTANCE = 5
 
