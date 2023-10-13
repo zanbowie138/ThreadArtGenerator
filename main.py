@@ -4,13 +4,15 @@ import cv2 as cv
 import numpy as np
 import time
 
+import utils
+
 # CONSTANTS/CONFIG
 IMPORT_FILEPATH = "res/mona_lisa.jpg"
 
 PINNED_FILEPATH = "output/pinned.jpg"
 OUTPUT_FILEPATH = "output/output.jpg"
 PINS_OUTPUT_FILEPATH = "output/string_path.txt"
-EDGE_OUTPUT_FILEPATH = "output/edges.jpg"
+EDGE_OUTPUT_FILEPATH = "debug/edges.jpg"
 
 NUM_PINS = 100
 NUM_LINES = 1000
@@ -20,97 +22,19 @@ MAX_RESOLUTION = 700
 INVERT_IMAGE = False
 PREVIEW_IMAGE = False
 USE_LINE_LENGTH = True
-USE_LINE_EFFECTIVENESS = False
-
+USE_LINE_EFFECTIVENESS = True
 
 # TO RUN ON CODESPACES:
 # sudo su
 # apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 # CTRL-SHIFT-P -> Python: Disable Linting (if not already disabled)
 
-def calculate_pins(radius: int, num_pins: int):
-    # Create empty array of 2d points
-    pins = np.empty((num_pins,2), dtype=object)
-
-    # Fill array with pins
-    for i in range(num_pins):
-        angle = (2*np.pi/num_pins)*i
-        x = (int)((radius-3)/2 * np.cos(angle) + radius/2)
-        y = (int)((radius-3)/2 * np.sin(angle) + radius/2)
-        pins[i] = np.array((x,y))
-
-    return pins
-
-def prepare_image(import_filepath: str, max_resolution: tuple, invert_image: bool = False):
-    # Import image
-    img = cv.imread(import_filepath, cv.IMREAD_GRAYSCALE)
-
-    # Invert all bits (if background is black)
-    if invert_image: img = ~img
-
-    # the smaller side of the image fed to the program will be the size of the cropped image
-    crop_size = min(img.shape)
-
-    # crop the image to a square aspect ratio
-    cropped_img = img[(int)(img.shape[0]/2 - crop_size/2):(int)(img.shape[0]/2 + crop_size/2), (int)(img.shape[1]/2 - crop_size/2):(int)(img.shape[1]/2 + crop_size/2)]
-
-    # Lower the resolution
-    radius = min(crop_size, max_resolution)
-    cropped_img = cv.resize(cropped_img, dsize=(radius, radius), interpolation=cv.INTER_CUBIC)
-    
-    return cropped_img, radius
-
-def image_convolution(matrix, kernel):
-    # assuming kernel is symmetric and odd
-    k_size = len(kernel)
-    m_height, m_width = matrix.shape
-    padded = np.pad(matrix, (k_size-1, k_size-1))
-    
-    # iterates through matrix, applies kernel, and sums
-    output_vals = []
-    for i in range(m_height):
-        for j in range(m_width):
-            output_vals.append(np.sum(padded[i:k_size+i, j:k_size+j]*kernel))
-
-    new_img = np.array(output_vals).reshape((m_height, m_width))
-
-    output = np.clip(new_img, 0, 255).astype(np.uint8)
-
-    # Goofy set border to 0
-    # probably better way to do this but whatever
-    output[:,(0,1)] = 0
-    output[(0,1),:] = 0
-
-    return output
-
-def sobel_edge_detection(img):
-    # Blur the image for better edge detection
-    img_blur = cv.GaussianBlur(img, (3,3), 0)
-    
-    # Sobel Edge Detection
-    sobelx = cv.Sobel(src=img_blur, ddepth=cv.CV_64F, dx=1, dy=0, ksize=5) # Sobel Edge Detection on the X axis
-    sobely = cv.Sobel(src=img_blur, ddepth=cv.CV_64F, dx=0, dy=1, ksize=5) # Sobel Edge Detection on the Y axis
-    sobelxy = cv.Sobel(src=img_blur, ddepth=cv.CV_64F, dx=1, dy=1, ksize=5) # Combined X and Y Sobel Edge Detection
-
-    channel_image = sobelxy
-
-    # Normalize the image
-    # https://stackoverflow.com/questions/74861003/rescaling-image-to-get-values-between-0-and-255
-    if channel_image.sum()!=0:
-        channel_image -= channel_image.mean()
-        channel_image /= channel_image.std()
-        channel_image *= 64
-        channel_image += 128
-            
-    channel_image = np.clip(channel_image, 0, 255).astype("uint8")
-    return channel_image
-
 def main():
     # Start time
     start_time = time.perf_counter()
 
     # Get initial image
-    base_img, radius = prepare_image(IMPORT_FILEPATH, MAX_RESOLUTION, INVERT_IMAGE)
+    base_img, radius = utils.prepare_image(IMPORT_FILEPATH, MAX_RESOLUTION, INVERT_IMAGE)
 
     # Create edge detection kernel
     kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
@@ -118,16 +42,23 @@ def main():
     # Convolute kernel
     # edge_img = ~image_convolution(base_img, kernel)
 
-    edge_img = sobel_edge_detection(base_img)
+    edge_img = ~utils.sobel_edge_detection(base_img)
 
     # Output edge image
     if EDGE_OUTPUT_FILEPATH != "": cv.imwrite(EDGE_OUTPUT_FILEPATH, edge_img)
 
     # Calculate positions of pins around the image
-    pins = calculate_pins(radius, NUM_PINS)
+    pins = utils.calculate_pins(radius, NUM_PINS)
 
     # Initialize 2d array of line costs
     ground_truth_costs = np.empty((NUM_PINS, NUM_PINS))
+
+    scaled_edge_img = (~np.copy(edge_img) * 0.7).astype(np.uint8)
+    scaled_base_img = (~np.copy(base_img) * 0.3).astype(np.uint8)
+
+    # Create proposed new image with line
+    edge_prio_img = ~cv.add(scaled_base_img,scaled_edge_img)
+    cv.imwrite("debug/edge_prio.png", edge_prio_img)
 
     # Calculate lines' cost based on image
     for f_idx, pos_f in enumerate(pins):
@@ -135,17 +66,15 @@ def main():
             # If calculating a line with itself, continue
             if f_idx == t_idx: continue
 
-            # Create proposed new image with line
-            proposed_img = cv.line(np.copy(base_img), pos_f, pos_t, 0, 1)
-            proposed_edge_img = cv.line(np.copy(edge_img), pos_f, pos_t, 0, 1)
+            # Add line to proposed image
+            proposed_img = cv.line(np.copy(edge_prio_img), pos_f, pos_t, 0, 1)
 
-            actual_cost = np.sum(cv.absdiff(proposed_img, base_img)).item()
-            actual_edge_cost = np.sum(cv.absdiff(proposed_edge_img, edge_img)).item()
-            # print(f'Actual cost: {actual_cost}, Actual edge cost: {actual_edge_cost}')
+            # Compare proposed image to actual image
+            actual_cost = np.sum(cv.absdiff(proposed_img, edge_prio_img)).item()
+            # cv.imwrite("edge.png", cv.absdiff(proposed_img, proposed_edge_img))
 
             # Cost is the difference between the images
-            cost = actual_cost - actual_edge_cost * 10
-            cost = -actual_edge_cost
+            cost = actual_cost
 
             # Add cost to array
             ground_truth_costs[f_idx, t_idx] = cost
@@ -162,7 +91,7 @@ def main():
     final_image = np.full((radius, radius), 255, dtype=np.uint8)
 
     # Pin history of every pin (to prevent duplicate lines)
-    per_pin_history = [set() for x in range(NUM_PINS)]
+    per_pin_history = [set() for _ in range(NUM_PINS)]
 
     # Overall pin history (for output)
     pin_history = np.empty(NUM_LINES+1)
@@ -191,7 +120,7 @@ def main():
             # Calculate actual cost
             scaled_cost = (ground_truth_costs[from_idx, dest_idx])
 
-            if USE_LINE_EFFECTIVENESS: scaled_cost -= line_effectiveness.item()
+            if USE_LINE_EFFECTIVENESS: scaled_cost -= (line_effectiveness.item() * 0.1)
 
             # If true, higher length lines will be more prevalent at the cost of a possibly worse image
             if USE_LINE_LENGTH: scaled_cost /= line_length.item()
