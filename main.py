@@ -15,7 +15,11 @@ PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 EDGE_OUTPUT_FILEPATH = "debug/edges.jpg"
 
 NUM_PINS = 100
-NUM_LINES = 1000
+NUM_LINES = 2000
+
+MIN_PIN_DISTANCE = 5
+
+LINE_THICKNESS = 1
 
 MAX_RESOLUTION = 700
 
@@ -33,7 +37,7 @@ def main():
     # Start time
     start_time = time.perf_counter()
 
-    # Get initial image
+    # Prepare initial image
     base_img, radius = utils.prepare_image(IMPORT_FILEPATH, MAX_RESOLUTION, INVERT_IMAGE)
 
     # Create edge detection kernel
@@ -44,21 +48,28 @@ def main():
 
     edge_img = ~utils.sobel_edge_detection(base_img)
 
-    # Output edge image
+    # Debug edge image
     if EDGE_OUTPUT_FILEPATH != "": cv.imwrite(EDGE_OUTPUT_FILEPATH, edge_img)
 
     # Calculate positions of pins around the image
     pins = utils.calculate_pins(radius, NUM_PINS)
 
+    # Create weighted images
+    scaled_edge_img = (~np.copy(edge_img) * 0.0).astype(np.uint8)
+    scaled_base_img = (~np.copy(base_img) * 1.0).astype(np.uint8)
+
+    cv.imwrite("debug/scaled_edge_img.png", scaled_edge_img)
+    cv.imwrite("debug/scaled_base_img.png", scaled_base_img)
+
+    # Add weighted images together
+    edge_prio_img = ~cv.add(scaled_base_img,scaled_edge_img)
+    cv.imwrite("debug/edge_prio.png", edge_prio_img)
+
     # Initialize 2d array of line costs
     ground_truth_costs = np.empty((NUM_PINS, NUM_PINS))
 
-    scaled_edge_img = (~np.copy(edge_img) * 0.7).astype(np.uint8)
-    scaled_base_img = (~np.copy(base_img) * 0.3).astype(np.uint8)
-
-    # Create proposed new image with line
-    edge_prio_img = ~cv.add(scaled_base_img,scaled_edge_img)
-    cv.imwrite("debug/edge_prio.png", edge_prio_img)
+    # Initialize 2d array of line lengths
+    line_lengths = np.empty((NUM_PINS, NUM_PINS))
 
     # Calculate lines' cost based on image
     for f_idx, pos_f in enumerate(pins):
@@ -66,18 +77,26 @@ def main():
             # If calculating a line with itself, continue
             if f_idx == t_idx: continue
 
+            # If pins are too close to each other, continue
+            if abs(f_idx - t_idx) < MIN_PIN_DISTANCE: continue
+
             # Add line to proposed image
-            proposed_img = cv.line(np.copy(edge_prio_img), pos_f, pos_t, 0, 1)
+            proposed_img = cv.line(np.copy(edge_prio_img), pos_f, pos_t, 0, LINE_THICKNESS)
 
             # Compare proposed image to actual image
             actual_cost = np.sum(cv.absdiff(proposed_img, edge_prio_img)).item()
             # cv.imwrite("edge.png", cv.absdiff(proposed_img, proposed_edge_img))
+
+            line_length = np.linalg.norm(np.array(pos_f) - np.array(pos_t)).item()
 
             # Cost is the difference between the images
             cost = actual_cost
 
             # Add cost to array
             ground_truth_costs[f_idx, t_idx] = cost
+
+            # Add line length to array
+            line_lengths[f_idx, t_idx] = np.linalg.norm(np.array(pos_f) - np.array(pos_t)).item()
         
         # Fancy status printing
         sys.stdout.write('\r')
@@ -108,25 +127,28 @@ def main():
             # If calculating a line with itself, continue
             if from_idx == dest_idx: continue
 
-            # Add line to proposed image
-            proposed_line_img = cv.line(np.copy(final_image), from_pos, dest_pos, 0, 1)
+            # If pins are too close to each other, continue
+            if abs(from_idx - dest_idx) < MIN_PIN_DISTANCE: continue
 
-            # See how much line actually changes the picture
-            line_effectiveness = np.sum(cv.absdiff(proposed_line_img, final_image)) 
+            # Get cost from original image
+            cost = ground_truth_costs[from_idx, dest_idx]
 
-            # Calculate line length
-            line_length = np.linalg.norm(np.array(from_pos) - np.array(dest_pos))
+            if USE_LINE_EFFECTIVENESS: 
+                # Add line to proposed image
+                proposed_line_img = cv.line(np.copy(final_image), from_pos, dest_pos, 0, LINE_THICKNESS)
 
-            # Calculate actual cost
-            scaled_cost = (ground_truth_costs[from_idx, dest_idx])
+                # See how much line actually changes the picture
+                line_effectiveness = np.sum(cv.absdiff(proposed_line_img, final_image)) 
 
-            if USE_LINE_EFFECTIVENESS: scaled_cost -= (line_effectiveness.item() * 0.1)
+                # Subtract cost
+                cost -= (line_effectiveness.item() * 0.5)
 
             # If true, higher length lines will be more prevalent at the cost of a possibly worse image
-            if USE_LINE_LENGTH: scaled_cost /= line_length.item()
+            if USE_LINE_LENGTH: 
+                cost /= line_lengths[from_idx, dest_idx]
 
             # Push cost and destination pin index
-            heapq.heappush(priority_queue, (scaled_cost, dest_idx))
+            heapq.heappush(priority_queue, (cost, dest_idx))
 
         # Only create new lines
         heap_idx = 1
