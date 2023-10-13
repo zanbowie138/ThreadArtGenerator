@@ -1,3 +1,4 @@
+import math
 import sys
 import heapq
 import cv2 as cv
@@ -7,30 +8,26 @@ import time
 import utils
 
 # CONSTANTS/CONFIG
-IMPORT_FILEPATH = "res/mona_lisa.jpg"
+IMPORT_FILEPATH = "res/abraham_lincoln.webp"
 
 PINNED_FILEPATH = "output/pinned.jpg"
 OUTPUT_FILEPATH = "output/output.jpg"
 PINS_OUTPUT_FILEPATH = "output/string_path.txt"
 EDGE_OUTPUT_FILEPATH = "debug/edges.jpg"
 
-NUM_PINS = 50
-NUM_LINES = 200
+NUM_PINS = 100
+NUM_LINES = 2000
 
-MIN_PIN_DISTANCE = 5
+MIN_PIN_DISTANCE = 0
 
-LINE_THICKNESS = 1
-
-MIN_PIN_DISTANCE = 5
-
-LINE_THICKNESS = 1
+LINE_THICKNESS = 2
 
 MAX_RESOLUTION = 700
 
 INVERT_IMAGE = False
-PREVIEW_IMAGE = False
-USE_LINE_LENGTH = True
-USE_LINE_EFFECTIVENESS = True
+PREVIEW_IMAGE = True
+USE_LINE_LENGTH = False
+USE_LINE_EFFECTIVENESS = False
 
 # TO RUN ON CODESPACES:
 # sudo su
@@ -62,11 +59,11 @@ def main():
     scaled_edge_img = (~np.copy(edge_img) * 0.0).astype(np.uint8)
     scaled_base_img = (~np.copy(base_img) * 1.0).astype(np.uint8)
 
-    cv.imwrite("debug/scaled_edge_img.png", scaled_edge_img)
-    cv.imwrite("debug/scaled_base_img.png", scaled_base_img)
+    cv.imwrite("debug/scaled_edge_img.png", ~scaled_edge_img)
+    cv.imwrite("debug/scaled_base_img.png", ~scaled_base_img)
 
     # Add weighted images together
-    edge_prio_img = ~cv.add(scaled_base_img,scaled_edge_img)
+    edge_prio_img = cv.add(scaled_base_img,scaled_edge_img)
     cv.imwrite("debug/edge_prio.png", edge_prio_img)
 
     # Initialize 2d array of line costs
@@ -88,16 +85,22 @@ def main():
             proposed_img = cv.line(np.copy(edge_prio_img), pos_f, pos_t, 0, LINE_THICKNESS)
 
             # Compare proposed image to actual image
-            actual_cost = np.sum(cv.absdiff(proposed_img, edge_prio_img)).item()
+            # The higher the cost, the less good a specific line is
+            diff = cv.subtract(proposed_img, edge_prio_img)
+            actual_cost = math.sqrt(np.sum(diff**2).item())
             # cv.imwrite("edge.png", cv.absdiff(proposed_img, proposed_edge_img))
 
             line_length = np.linalg.norm(np.array(pos_f) - np.array(pos_t)).item()
+            # print(line_length * 255 - actual_cost)
 
             # Cost is the difference between the images
             cost = actual_cost
 
+            # print(cost)
+            # input("Press Enter to continue...")
+
             # Add cost to array
-            ground_truth_costs[f_idx, t_idx] = cost
+            ground_truth_costs[f_idx, t_idx] = -cost
 
             # Add line length to array
             line_lengths[f_idx, t_idx] = np.linalg.norm(np.array(pos_f) - np.array(pos_t)).item()
@@ -145,7 +148,7 @@ def main():
                 line_effectiveness = np.sum(cv.absdiff(proposed_line_img, final_image)) 
 
                 # Subtract cost
-                cost -= (line_effectiveness.item() * 0.5)
+                cost -= (line_effectiveness.item() * 0.1)
 
             # If true, higher length lines will be more prevalent at the cost of a possibly worse image
             if USE_LINE_LENGTH: 
